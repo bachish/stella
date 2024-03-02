@@ -1,0 +1,5 @@
+grammar StellaParser;
+
+stellaFile
+    : 'hi'
+    ;
