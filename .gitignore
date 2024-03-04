@@ -50,3 +50,5 @@ bin/
 /.idea/vcs.xml
 /src/main/java/grammar/gen/
 /.idea/uiDesigner.xml
+/src/test/resources/my-stella-tests/bad-bag/
+/src/test/resources/my-stella-tests/

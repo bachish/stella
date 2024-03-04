@@ -18,7 +18,8 @@ dependencies {
     implementation("org.antlr:antlr4:4.13.1")
     // https://github.com/Strumenta/antlr-kotlin
     implementation("com.strumenta:antlr-kotlin-runtime:1.0.0-RC2")
-
+    // https://mvnrepository.com/artifact/org.junit.jupiter/junit-jupiter
+    testImplementation("org.junit.jupiter:junit-jupiter:5.10.2")
 }
 
 tasks.test {

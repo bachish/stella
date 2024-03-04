@@ -1,6 +1,6 @@
 package org.pl
 
-class TypeCheckingError(errorTag: String, message: String?) : Exception("Type Error Tag: [$errorTag]\n$message") {
+class TypeCheckingError(val errorTag: String, message: String?) : Exception("Type Error Tag: [$errorTag]\n$message") {
     companion object {
         fun unexpectedType(expectedType: StellaType, actualType: StellaType, expr: String): TypeCheckingError {
             return TypeCheckingError(
@@ -14,5 +14,18 @@ for expression
  """
             )
         }
+        fun emptyContext( ): TypeCheckingError{
+            return TypeCheckingError("EMPTY_CONTEXT", "can't parse type")
+        }
+        fun unexpectedType(errorTag: String,
+                           expectedType: StellaType,
+                           actualExpr: String,
+                           expectedTypePrefix: String = "",
+                           actualTypePrefix: String = "") : TypeCheckingError{
+            return  TypeCheckingError(errorTag,
+                "expected an expression of a $expectedTypePrefix " +
+                "type \n$expectedType but got $actualTypePrefix $actualExpr")
+        }
     }
+
 }

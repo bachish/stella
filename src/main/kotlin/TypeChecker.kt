@@ -10,12 +10,17 @@ import java.io.OutputStream
 
 class TypeChecker {
     companion object {
-        fun check(input: InputStream = System.`in`, output: OutputStream = System.out): Int {
+        fun checkUnsafe(input: InputStream = System.`in`, output: OutputStream = System.out): Int {
             val code = input.reader().readText()
             val parser = getParser(code)
             val visitor = TypeCheckingVisitor()
+            visitor.visitStart_Program(parser.start_Program())
+            return 0
+        }
+
+        fun check(input: InputStream = System.`in`, output: OutputStream = System.out): Int {
             try {
-                visitor.visitStart_Program(parser.start_Program())
+                checkUnsafe(input, output)
             } catch (e: TypeCheckingError) {
                 System.err.println(e.message)
                 return -1
