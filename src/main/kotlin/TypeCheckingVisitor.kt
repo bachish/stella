@@ -3,137 +3,53 @@ package org.pl
 import grammar.StellaRuleContext
 import grammar.gen.StellaParser
 import grammar.gen.StellaParser.*
-import java.util.stream.Collectors
 
 
 class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
     private val mainName = "main"
 
-    private fun checkBeforeInference(expectedType: StellaType, actualCtx: StellaRuleContext) {
-        when (actualCtx) {
-            is AbstractionContext -> if (expectedType !is Fun) {
-                throw TypeCheckingError.unexpectedType(
-                    "ERROR_UNEXPECTED_LAMBDA",
-                    expectedType,
-                    actualCtx.text,
-                    " non-function ",
-                    " an anonymous function "
-                )
-            }
-
-            is TupleContext -> if (expectedType !is Tuple) {
-                throw TypeCheckingError.unexpectedType(
-                    "ERROR_UNEXPECTED_TUPLE",
-                    expectedType,
-                    actualCtx.text,
-                    " non-tuple ",
-                    " a tuple "
-                )
-            }
-
-            is RecordContext -> if (expectedType !is Record) {
-                throw TypeCheckingError.unexpectedType(
-                    "ERROR_UNEXPECTED_RECORD",
-                    expectedType,
-                    actualCtx.text,
-                    " non-record ",
-                    " a record "
-                )
-            }
-
-            is ListContext -> if (expectedType !is Record) {
-                throw TypeCheckingError.unexpectedType(
-                    "ERROR_UNEXPECTED_LIST",
-                    expectedType,
-                    actualCtx.text,
-                    " non-list ",
-                    " a list "
-                )
-            }
-//            is InlContext -> if (expectedType !is Inl) {
-//                throw TypeCheckingError.unexpectedType(
-//                    "ERROR_UNEXPECTED_INJECTION",
-//                    expectedType,
-//                    actualCtx.text,
-//                    " non-injection ",
-//                    " an left injection "
-//                )
-//            }
-//            is InrContext -> if (expectedType !is Record) {
-//                throw TypeCheckingError.unexpectedType(
-//                    "ERROR_UNEXPECTED_INJECTION",
-//                    expectedType,
-//                    actualCtx.text,
-//                    " non-injection ",
-//                    " an right injection "
-//                )
-//            }
-        }
-
-    }
-
-
-    private fun checkType(expectedType: StellaType, actualCtx: StellaRuleContext) {
-        checkBeforeInference(expectedType, actualCtx)
-
-        val actualType = actualCtx.accept(this)
-        return checkType(expectedType, actualType, actualCtx.text)
-    }
-
-    private fun checkRecordType(expectedType: Record, actualType: Record, code: String) {
-        if (expectedType.items == actualType.items) {
-            return
-        }
-        for ((label, type) in expectedType.items) {
-            val type_ = actualType.items[label]
-            if (type_ == null || type_ != type) {
-                throw TypeCheckingError("ERROR_MISSING_RECORD_FIELDS", "at $code")
-            }
-        }
-        for ((label, type) in actualType.items) {
-            val type_ = expectedType.items[label]
-            if (type_ == null || type_ != type) {
-                throw TypeCheckingError("ERROR_UNEXPECTED_RECORD_FIELDS", "at $code")
-            }
+    private fun checkExpectation(ctx: StellaRuleContext, type: StellaType) {
+        if (ctx.expected != null && ctx.expected != type) {
+            throw TypeCheckingError.unexpectedType(ctx.expected, type, ctx)
         }
     }
 
-    private fun checkType(expectedType: StellaType, actualType: StellaType, exprView: String) {
-        if (expectedType is Record && actualType is Record) {
-            checkRecordType(expectedType, actualType, exprView)
-        }
 
-
-        if (expectedType != actualType) {
-            throw TypeCheckingError.unexpectedType(expectedType, actualType, exprView)
-        }
+    private fun inferType(ctx: StellaRuleContext): StellaType {
+        ctx.updateLocals()
+        ctx.expected = null
+        return ctx.accept(this)
     }
 
+    private fun checkType(ctx: StellaRuleContext, expectedType: StellaType?): StellaType {
+        ctx.updateLocals()
+        ctx.expected = expectedType
+        return ctx.accept(this)
+    }
 
     override fun visitProgram(ctx: ProgramContext): StellaType {
-        visitChildren(ctx)
+        for (decl in ctx.decls) {
+            inferType(decl)
+        }
         if (ctx.localVariables?.containsKey(mainName) == false) {
-            throw TypeCheckingError("ERROR_MISSING_MAIN", "main function is not found in the program")
+            throw TypeCheckingError.missingMain()
         }
         return StellaUnit
     }
 
 
     override fun visitDeclFun(ctx: DeclFunContext): StellaType {
-
-        ctx.updateLocals()
-
         val funName = ctx.name.text
-        val expectedType = ctx.returnType.accept(this)
+        val returnType = inferType(ctx.returnType)
+        val paramTypes = ctx.paramDecls.map { inferType(it) }
+        val funType = Fun(paramTypes, returnType)
 
-        val paramTypes = ctx.paramDecls.stream().map { visitParamDecl(it) }.collect(Collectors.toList())
-        val funType = Fun(paramTypes, expectedType)
-        (ctx.parent as StellaRuleContext).localVariables[funName] = funType
+        ctx.addToParentCtx(funName, funType)
 
-        ctx.localDecls.forEach { it.accept(this) }
+        ctx.localDecls.forEach { inferType(it) }
 
-        checkType(expectedType, ctx.returnExpr)
-        return expectedType
+        checkType(ctx.returnExpr, returnType)
+        return funType
     }
 
     override fun visitDeclFunGeneric(ctx: DeclFunGenericContext): StellaType {
@@ -157,11 +73,9 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
     }
 
     override fun visitParamDecl(ctx: ParamDeclContext): StellaType {
-
         val name: String = ctx.name.text
-        val type: StellaType = ctx.paramType.accept(this)
-        val par = ctx.parent as (StellaRuleContext)
-        par.localVariables[name] = type
+        val type: StellaType = inferType(ctx.paramType)
+        ctx.addToParentCtx(name, type)
         return type
     }
 
@@ -190,7 +104,7 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
     }
 
     override fun visitTypeSum(ctx: TypeSumContext): StellaType {
-        TODO("Not yet implemented")
+        return Sum(inferType(ctx.left), inferType(ctx.right))
     }
 
     override fun visitTypeNat(ctx: TypeNatContext): StellaType {
@@ -206,10 +120,9 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
     }
 
     private fun <T : StellaRuleContext> acceptAndGet(params: List<T>): List<StellaType> {
-        val paramTypes = params.stream().map {
-            it.updateLocals()
-            it.accept(this)
-        }.collect(Collectors.toList())
+        val paramTypes = params.map {
+            inferType(it)
+        }
         return paramTypes
     }
 
@@ -219,23 +132,18 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      *      )? ')' '->' returnType = stellatype                        # TypeFun
      */
     override fun visitTypeFun(ctx: TypeFunContext): StellaType {
-           ctx.updateLocals()
-
-        return Fun(acceptAndGet(ctx.paramTypes), ctx.returnType.accept(this))
+        return Fun(acceptAndGet(ctx.paramTypes), inferType(ctx.returnType))
     }
 
     override fun visitTypeForAll(ctx: TypeForAllContext): StellaType {
         TODO("Not yet implemented")
     }
-//    | 'forall' (types += StellaIdent)* '.' type_ = stellatype          # TypeForAll
-//    | 'µ' var = StellaIdent '.' type_ = stellatype             # TypeRec
-//    | left = stellatype '+' right = stellatype                 # TypeSum
 
     /**
      * '{' (types += stellatype (',' types += stellatype)*)? '}' # TypeTuple
      */
     override fun visitTypeTuple(ctx: TypeTupleContext): StellaType {
-            return Tuple(acceptAndGet(ctx.types))
+        return Tuple(acceptAndGet(ctx.types))
     }
 
     override fun visitTypeTop(ctx: TypeTopContext): StellaType {
@@ -246,61 +154,52 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      * name = StellaIdent                                        # TypeVar
      */
     override fun visitTypeVar(ctx: TypeVarContext): StellaType {
-        ctx.updateLocals()
-
-        val varName = ctx.name.text
-        if (!ctx.localVariables.containsKey(varName)) {
-            throw TypeCheckingError("ERROR_UNDEFINED_VARIABLE", "undefined variable $varName")
-        }
-        return ctx.localVariables[varName]!!
+        TODO("Not yet implemented")
     }
 
+    /**
+     *    '<|' (
+     *         fieldTypes += variantFieldType (
+     *             ',' fieldTypes += variantFieldType
+     *         )*
+     *     )? '|>'                                                     # TypeVariant
+     */
     override fun visitTypeVariant(ctx: TypeVariantContext): StellaType {
-        TODO("Not yet implemented")
+        val type = Variant(ctx.fieldTypes
+            .associate { it.label.text to it?.type_?.accept(this) })
+        checkExpectation(ctx, type)
+        return type
     }
 
     /**
      *  '{'  fieldTypes += recordFieldType (',' fieldTypes += recordFieldType)* '}' # TypeRecord
      */
     override fun visitTypeRecord(ctx: TypeRecordContext): StellaType {
-        ctx.updateLocals()
-        val items = hashMapOf<String, StellaType>()
-        ctx.fieldTypes.stream()
-            .forEach {
-                it.updateLocals()
-                val name: String = it.label.text
-                val type: StellaType = it.type_.accept(this)
-                if (items.containsKey(name)) {
-                    throw TypeCheckingError("ERROR_RECORD_DUPLICATE_LABEL", "at ${ctx.text}")
-                } else items[name] = type
-            }
-        return Record(items)
+        val labelsCount = ctx.fieldTypes.groupingBy { it.label.text }.eachCount()
+        val duplicate = labelsCount.entries.firstOrNull { it.value > 1 }
+        if (duplicate != null) {
+            throw TypeCheckingError.recordDuplicatedLabel(ctx, duplicate.key)
+        }
+        val labels: List<String> = ctx.fieldTypes.map { it.label.text }
+        val items = ctx.fieldTypes.associate { it.label.text to inferType(it.type_) }
+        return Record(items, labels)
     }
+
 
     /**
      * '[' type_ = stellatype ']' # TypeList
      */
     override fun visitTypeList(ctx: TypeListContext): StellaType {
-        ctx.updateLocals()
-
-        val itemType = ctx.type_.accept(this)
+        val itemType = inferType(ctx.type_)
         return StellaList(itemType)
     }
 
-    override fun visitRecordFieldType(ctx: RecordFieldTypeContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitVariantFieldType(ctx: VariantFieldTypeContext): StellaType {
-        TODO("Not yet implemented")
-    }
 
     /**
      * '(' type_ = stellatype ')' # TypeParens;
      */
     override fun visitTypeParens(ctx: TypeParensContext): StellaType {
-        ctx.updateLocals()
-        return ctx.type_.accept(this)
+        return inferType(ctx.type_)
     }
 
 
@@ -316,50 +215,50 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      * expr_ = expr '.' label = StellaIdent # DotRecord
      */
     override fun visitDotRecord(ctx: DotRecordContext): StellaType {
-        ctx.updateLocals()
-
-        val recordType = ctx.expr_.accept(this)
+        val recordType = inferType(ctx.expr_)
 
         if (recordType !is Record) {
-            throw TypeCheckingError("ERROR_NOT_A_RECORD", "")
+            throw TypeCheckingError.notARecord(ctx)
         }
 
         val label = ctx.label.text
 
-        val srcType = if (recordType.items.containsKey(label)) {
-            recordType.items[label]!!
-        } else {
-            throw TypeCheckingError(
-                "ERROR_UNEXPECTED_FIELD_ACCESS",
-                "at ${ctx.text}"
-            )
-        }
+        val srcType = recordType.items[label]
+            ?: throw TypeCheckingError.unexpectedRecordFieldAccess(ctx, label)
 
+        checkExpectation(ctx, srcType)
         return srcType
     }
 
-    override fun visitGreaterThan(ctx: GreaterThanContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitEqual(ctx: EqualContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitThrow(ctx: ThrowContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitMultiply(ctx: MultiplyContext): StellaType {
-        TODO("Not yet implemented")
-    }
 
     override fun visitConstMemory(ctx: ConstMemoryContext): StellaType {
         TODO("Not yet implemented")
     }
 
+    /**
+     * '[' (exprs += expr (',' exprs += expr)*)? ']' # List
+     */
     override fun visitList(ctx: ListContext): StellaType {
-        TODO("Not yet implemented")
+        val expectedType = ctx.expected
+        if (expectedType == null) {
+            if (ctx.exprs.size == 0) {
+                throw TypeCheckingError.ambiguousList(ctx)
+            }
+            val items = ctx.exprs.iterator()
+            val itemType = inferType(items.next())
+            while (items.hasNext()) {
+                checkType(items.next(), itemType)
+            }
+            return StellaList(itemType)
+        } else {
+            if (expectedType !is StellaList) {
+                throw TypeCheckingError.unexpectedList(ctx)
+            }
+            for (item in ctx.exprs) {
+                checkType(item, expectedType.elemType)
+            }
+            return expectedType
+        }
     }
 
     override fun visitTryCatch(ctx: TryCatchContext): StellaType {
@@ -370,42 +269,59 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      * expr_ = expr '.' index = INTEGER   # DotTuple
      */
     override fun visitDotTuple(ctx: DotTupleContext): StellaType {
-        ctx.updateLocals()
-
-        val tupleType = ctx.expr_.accept(this)
+        val tupleType = inferType(ctx.expr_)
 
         if (tupleType !is Tuple) {
-            throw TypeCheckingError("ERROR_NOT_A_TUPLE", "")
+            throw TypeCheckingError.notATuple(ctx)
         }
 
         val id = ctx.index.text.toInt()
 
-        val srcType = if (id < tupleType.items.size) {
-            tupleType.items[id]
-        } else {
-            throw TypeCheckingError("ERROR!!", "")
+        if (id < 1 || id > tupleType.items.size) {
+            throw TypeCheckingError.outOfIndexTuple(ctx)
         }
+        val srcType = tupleType.items[id - 1]
 
+        checkExpectation(ctx, srcType)
         return srcType
     }
 
+    /**
+     *  (T -> T) -> T
+     *  | 'fix' '(' expr_ = expr ')'                                     # Fix
+     *
+     */
     override fun visitFix(ctx: FixContext): StellaType {
-        TODO("Not yet implemented")
+        val expectedType = ctx.expected
+        if (ctx.expected == null) {
+            val funType = inferType(ctx.expr_)
+            if (funType !is Fun) {
+                throw TypeCheckingError.notAFunction(ctx)
+            }
+            if (funType.args.size != 1 || funType.args[0] != funType.ret) {
+                TypeCheckingError.notAFunction(ctx)
+            }
+            return funType.ret
+
+        } else {
+            checkType(ctx.expr_, Fun(listOf(expectedType), expectedType))
+            return expectedType
+        }
     }
 
+    /**
+     * 'let' patternBindings+=patternBinding (',' patternBindings+=patternBinding)* 'in' body = expr           # Let
+     */
     override fun visitLet(ctx: LetContext): StellaType {
-        TODO("Not yet implemented")
+        ctx.patternBindings.forEach { inferType(it) }
+        return checkType(ctx.body, ctx.expected)
     }
-
-    override fun visitAssign(ctx: AssignContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
 
     /**
      * CONSTANTS
      */
     override fun visitConstTrue(ctx: ConstTrueContext): StellaType {
+        checkExpectation(ctx, Bool)
         return Bool
     }
 
@@ -418,10 +334,12 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
     }
 
     override fun visitConstFalse(ctx: ConstFalseContext): StellaType {
+        checkExpectation(ctx, Bool)
         return Bool
     }
 
     override fun visitConstUnit(ctx: ConstUnitContext): StellaType {
+        checkExpectation(ctx, StellaUnit)
         return StellaUnit
     }
 
@@ -430,56 +348,78 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
     }
 
     override fun visitConstInt(ctx: ConstIntContext): StellaType {
+        checkExpectation(ctx, Nat)
         return Nat
     }
 
+    /**
+     * '<|' label = StellaIdent ('=' rhs = expr)? '|>' # Variant
+     * for example, "ret <Ok = 12>"
+     */
     override fun visitVariant(ctx: VariantContext): StellaType {
-        TODO("Not yet implemented")
+        val expectedType = ctx.expected ?: throw TypeCheckingError.ambiguousVariant(ctx)
+        if (expectedType !is Variant) {
+            throw TypeCheckingError.unexpectedVariant(ctx)
+        }
+        val varLabel = ctx.label.text
+        if (varLabel !in expectedType.labelToType) {
+            throw TypeCheckingError.unexpectedVariantLabel(ctx, varLabel)
+        }
+        val expectedVarType = expectedType.labelToType[varLabel]
+        if (ctx.rhs == null && expectedVarType == null) {
+            return expectedType
+        }
+        if (expectedVarType == null) {
+            throw TypeCheckingError.dataForNullaryVariantLabel(ctx, varLabel)
+        }
+        if (ctx.rhs == null) {
+            throw TypeCheckingError.missingDataForVariant(ctx, varLabel)
+        }
+        return checkType(ctx.rhs, expectedVarType)
     }
 
-    //    | mem = MemoryAddress                # ConstMemory
+
     /**
      *  name = StellaIdent                 # Var
      */
     override fun visitVar(ctx: VarContext): StellaType {
-        ctx.updateLocals()
-
         val varName = ctx.name.text
         if (!ctx.localVariables.containsKey(varName)) {
-            throw TypeCheckingError("ERROR_UNDEFINED_VARIABLE", "undefined variable $varName")
+            throw TypeCheckingError.undefinedVar(varName)
         }
-        return ctx.localVariables[varName]!!
+        val varType = ctx.localVariables[varName]!!
+        checkExpectation(ctx, varType)
+        return varType
     }
 
     override fun visitTypeAbstraction(ctx: TypeAbstractionContext): StellaType {
         TODO("Not yet implemented")
     }
 
-    override fun visitDivide(ctx: DivideContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitLessThan(ctx: LessThanContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-
-//    | 'panic!'                    # Panic
-//    | 'throw' '(' expr_=expr ')'  # Throw
-//    | 'try' '{' tryExpr=expr '}' 'catch' '{' pat=pattern '=>' fallbackExpr=expr '}'  # TryCatch
-//    | 'try' '{' tryExpr=expr '}' 'with' '{' fallbackExpr=expr '}'  # TryWith
-
-    //    | 'inl' '(' expr_=expr ')'                     # Inl
-//    | 'inr' '(' expr_=expr ')'                     # Inr
     override fun visitInl(ctx: InlContext): StellaType {
-        return super.visitInl(ctx)
+        val expectedType = ctx.expected ?: throw TypeCheckingError.ambiguousSum(ctx)
+        if (expectedType !is Sum) {
+            throw TypeCheckingError.unexpectedInj(ctx)
+        }
+        checkType(ctx.expr_, expectedType.left)
+        return expectedType
     }
 
 
     override fun visitInr(ctx: InrContext): StellaType {
-        TODO("Not yet implemented")
+        val expectedType = ctx.expected ?: throw TypeCheckingError.ambiguousSum(ctx)
+        if (expectedType !is Sum) {
+            throw TypeCheckingError.unexpectedInj(ctx)
+        }
+        checkType(ctx.expr_, expectedType.right)
+        return expectedType
     }
 
+    /**
+     * 'match' expr_ = expr '{' (
+     *         cases += matchCase ('|' cases += matchCase)*
+     *     )? '}'                                         # Match
+     */
     override fun visitMatch(ctx: MatchContext): StellaType {
         TODO("Not yet implemented")
     }
@@ -489,19 +429,28 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      * 'cons' '(' head = expr ',' tail = expr ')'                     # ConsList
      */
     override fun visitConsList(ctx: ConsListContext): StellaType {
-        ctx.updateLocals()
-
-        val headType = ctx.head.accept(this)
-        val tailType = ctx.tail.accept(this)!!
-        if (tailType !is StellaList) {
-            throw TypeCheckingError("ERROR_NOT_A_LIST", "try to cons with no list ${ctx.text}")
+        val expectedType = ctx.expected
+        if (expectedType == null) {
+            val headType = inferType(ctx.head)
+            return checkType(ctx.tail, StellaList(headType))
+        } else {
+            if (expectedType !is StellaList) {
+                throw TypeCheckingError.unexpectedList(ctx)
+            }
+            checkType(ctx.head, expectedType.elemType)
+            checkType(ctx.tail, expectedType)
+            return expectedType
         }
-        checkType(headType, tailType.elemType, ctx.text)
-        return headType
     }
 
+    /**
+     * patternBinding: pat=pattern '=' rhs=expr ;
+     */
     override fun visitPatternBinding(ctx: PatternBindingContext): StellaType {
-        TODO("Not yet implemented")
+        val exprType = inferType(ctx.rhs)
+        checkType(ctx.pat, exprType)
+        ctx.addAllToParentCtx()
+        return exprType
     }
 
     override fun visitBinding(ctx: BindingContext): StellaType {
@@ -553,7 +502,8 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
     }
 
     override fun visitPatternVar(ctx: PatternVarContext): StellaType {
-        TODO("Not yet implemented")
+        ctx.addToParentCtx(ctx.name.text, ctx.expected)
+        return ctx.expected
     }
 
 
@@ -577,13 +527,16 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      * 'List::head' '(' list = expr ')'                               # Head
      */
     override fun visitHead(ctx: HeadContext): StellaType {
-        ctx.updateLocals()
-
-        val listType = ctx.list.accept(this)
-        if (listType !is StellaList) {
-            throw TypeCheckingError("ERROR_NOT_A_LIST", "try to cons with no list ${ctx.text}")
+        val expectedType = ctx.expected
+        if (expectedType == null) {
+            val listType = inferType(ctx.list)
+            if (listType !is StellaList) {
+                throw TypeCheckingError.notAList(ctx)
+            }
+            return listType.elemType
+        } else {
+            return checkType(ctx.list, StellaList(expectedType))
         }
-        return listType.elemType
     }
 
 
@@ -591,12 +544,11 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      * 'List::isempty' '(' list = expr ')'                            # IsEmpty
      */
     override fun visitIsEmpty(ctx: IsEmptyContext): StellaType {
-        ctx.updateLocals()
-
-        val listType = ctx.list.accept(this)
+        val listType = inferType(ctx.list)
         if (listType !is StellaList) {
-            throw TypeCheckingError("ERROR_NOT_A_LIST", "try to cons with no list ${ctx.text}")
+            throw TypeCheckingError.notAList(ctx)
         }
+        checkExpectation(ctx, Bool)
         return Bool
     }
 
@@ -605,65 +557,51 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      * 'List::tail' '(' list = expr ')'                               # Tail
      */
     override fun visitTail(ctx: TailContext): StellaType {
-        ctx.updateLocals()
-
-        val listType = ctx.list.accept(this)
-        if (listType !is StellaList) {
-            throw TypeCheckingError("ERROR_NOT_A_LIST", "try to cons with no list ${ctx.text}")
+        if (ctx.expected != null && ctx.expected is StellaList) {
+            return checkType(ctx.list, ctx.expected)
         }
+        val listType = inferType(ctx.list)
+        if (listType !is StellaList) {
+            throw TypeCheckingError.notAList(ctx)
+        }
+        checkExpectation(ctx, listType)
         return listType
     }
 
     override fun visitSucc(ctx: SuccContext): StellaType {
-        ctx.updateLocals()
-
-        checkType(Nat, ctx.n)
+        checkType(ctx.n, Nat)
+        checkExpectation(ctx, Nat)
         return Nat
     }
 
-//    | 'not' '(' expr_ = expr ')'                                     # LogicNot
-//    | 'Nat::pred' '(' n = expr ')'                                   # Pred
     /**
      * 'Nat::iszero' '(' n = expr ')'                                 # IsZero
      */
     override fun visitIsZero(ctx: IsZeroContext): StellaType {
-        ctx.updateLocals()
-
-        checkType(Nat, ctx.n)
+        checkType(ctx.n, Nat)
+        checkExpectation(ctx, Bool)
         return Bool
     }
-//    | 'fix' '(' expr_ = expr ')'                                     # Fix
-//override fun visitFix(ctx: StellaParser.FixContext): StellaType {
-//    if (ctx == null) {
-//        throw TypeCheckingError.emptyContext()
-//    }
-//    ctx.updateLocals()
-//
-//}
-//    | 'Nat::rec' '(' n = expr ',' initial = expr ',' step = expr ')' # NatRec
-//    | 'fold' '[' type_ = stellatype ']' expr_ = expr                 # Fold
-//    | 'unfold' '[' type_ = stellatype ']' expr_ = expr               # Unfold
 
     /**
      * fun = expr '(' (args += expr (',' args += expr)*)? ')'
      */
     override fun visitApplication(ctx: ApplicationContext): StellaType {
-        ctx.updateLocals()
-
-        val funType = ctx.`fun`.accept(this)
+        val funType = inferType(ctx.`fun`)
         if (funType !is Fun) {
-            throw TypeCheckingError("ERROR_NOT_A_FUNCTION", "not a function in application ${ctx.text}")
+            throw TypeCheckingError.notAFunction(ctx)
+        }
+        if (ctx.args.size != funType.args.size) {
+            throw TypeCheckingError.incorrectNumberOfArgs(ctx)
         }
 
-        if (ctx.args.size != funType.arg.size) {
-            throw TypeCheckingError("ERROR_INCORRECT_NUMBER_OF_ARGUMENTS", " at ${ctx.text}")
+
+        funType.args.zip(ctx.args).stream().forEach { (expType, actCtx) ->
+            checkType(actCtx, expType)
         }
 
-        funType.arg.zip(ctx.args).stream().forEach { (expType, actCtx) ->
-            checkType(expType, actCtx)
-        }
-
-        return funType.res
+        checkExpectation(ctx, funType.ret)
+        return funType.ret
     }
 
     override fun visitDeref(ctx: DerefContext): StellaType {
@@ -676,8 +614,22 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      *   )? ')' '{' 'return' returnExpr = expr '}'       # Abstraction
      */
     override fun visitAbstraction(ctx: AbstractionContext): StellaType {
-        ctx.updateLocals()
-        return Fun(acceptAndGet(ctx.paramDecls), ctx.returnExpr.accept(this))
+        val expected = ctx.expected
+        if (expected == null) {
+            return Fun(acceptAndGet(ctx.paramDecls), inferType(ctx.returnExpr))
+        } else {
+            if (expected !is Fun) {
+                throw TypeCheckingError.unexpectedLambda(ctx)
+            }
+            if (ctx.paramDecls.size != expected.args.size) {
+                throw TypeCheckingError.unexpectedNumberOfParametersInLambda(ctx)
+            }
+
+            ctx.paramDecls.zip(expected.args).forEach { (decl, exp) -> checkType(decl, exp) }
+
+            checkType(ctx.returnExpr, expected.ret)
+            return expected
+        }
     }
 
 
@@ -685,28 +637,56 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      * '{' (exprs += expr (',' exprs += expr)*)? '}' # Tuple
      */
     override fun visitTuple(ctx: TupleContext): StellaType {
-        ctx.updateLocals()
-        return Tuple(ctx.exprs.stream().map { it.accept(this) }.collect(Collectors.toList()))
+        val expectedType = ctx.expected
+        if (expectedType == null) {
+            return Tuple(ctx.exprs.map { inferType(it) })
+        } else {
+            if (expectedType !is Tuple) {
+                throw TypeCheckingError.unexpectedTuple(ctx)
+            }
+            if (expectedType.items.size != ctx.exprs.size) {
+                throw TypeCheckingError.unexpectedTupleLength(ctx)
+            }
+            for ((exp, decl) in expectedType.items.zip(ctx.exprs)) {
+                checkType(decl, exp)
+            }
+            return expectedType
+        }
+
     }
 
     /**
      * '{' bindings += binding (',' bindings += binding)* '}' # Record
      */
     override fun visitRecord(ctx: RecordContext): StellaType {
-        ctx.updateLocals()
+        val expectedType = ctx.expected
 
-        val items = hashMapOf<String, StellaType>()
-        ctx.bindings.stream()
-            .forEach {
-                it.updateLocals()
-                val name: String = it.name.text
-                val type: StellaType = it.rhs.accept(this)
-                if (items.containsKey(name)) {
-                    throw TypeCheckingError("ERROR_RECORD_DUPLICATE_LABEL", "at ${ctx.text}")
-                } else items[name] = type
+        val labelsCount = ctx.bindings.groupingBy { it.name.text }.eachCount()
+        val duplicate = labelsCount.entries.firstOrNull { it.value > 1 }
+        if (duplicate != null) {
+            throw TypeCheckingError.recordDuplicatedLabel(ctx, duplicate.key)
+        }
+        val items: Map<String, StellaType>
+        val labels: List<String> = ctx.bindings.map { it.name.text }
+        if (expectedType == null) {
+            items = ctx.bindings.associate { it.name.text to inferType(it.rhs) }
+            return Record(items, labels)
+        } else {
+            if (expectedType !is Record) {
+                throw TypeCheckingError.unexpectedRecord(ctx)
             }
-        return Record(items)
+            val unexpectedLabels = labelsCount.keys.subtract(expectedType.items.keys)
+            if (unexpectedLabels.isNotEmpty()) {
+                throw TypeCheckingError.unexpectedRecordField(ctx, unexpectedLabels.first())
+            }
+            val missingLabels = expectedType.items.keys.subtract(labelsCount.keys)
+            if (missingLabels.isNotEmpty()) {
+                throw TypeCheckingError.missingRecordField(ctx, missingLabels.first())
+            }
+            ctx.bindings.forEach { checkType(it.rhs, expectedType.items[it.name.text]!!) }
 
+            return expectedType
+        }
     }
 
 
@@ -726,12 +706,24 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
         TODO("Not yet implemented")
     }
 
+    /**
+     *     | expr_ = expr 'as' type_ = stellatype # TypeAsc
+     */
     override fun visitTypeAsc(ctx: TypeAscContext): StellaType {
-        TODO("Not yet implemented")
+        val type = inferType(ctx.type_)
+        checkType(ctx.expr_, type)
+        checkExpectation(ctx, type)
+        return type
     }
 
+    /**
+     *   | 'Nat::rec' '(' n = expr ',' initial = expr ',' step = expr ')' # NatRec
+     */
     override fun visitNatRec(ctx: NatRecContext): StellaType {
-        TODO("Not yet implemented")
+        checkType(ctx.n, Nat)
+        val retType = checkType(ctx.initial, ctx.expected)
+        checkType(ctx.step, Fun(listOf(Nat), Fun(listOf(retType), retType)))
+        return retType
     }
 
     override fun visitUnfold(ctx: UnfoldContext): StellaType {
@@ -746,11 +738,9 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      * 'if' condition = expr 'then' thenExpr = expr 'else' elseExpr = expr # If
      */
     override fun visitIf(ctx: IfContext): StellaType {
-        ctx.updateLocals()
-
-        checkType(Bool, ctx.condition)
-        val resType = ctx.thenExpr.accept(this)
-        checkType(resType, ctx.elseExpr)
+        checkType(ctx.condition, Bool)
+        val resType = checkType(ctx.thenExpr, ctx.expected)
+        checkType(ctx.elseExpr, resType)
         return resType
     }
 
@@ -758,7 +748,10 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      * '(' expr_ = expr ')'    # ParenthesisedExpr
      */
     override fun visitParenthesisedExpr(ctx: ParenthesisedExprContext): StellaType {
-        ctx.updateLocals()
-        return ctx.expr_.accept(this)
+        return checkType(ctx.expr_, ctx.expected)
+    }
+
+    override fun visitTerminatingSemicolon(ctx: StellaParser.TerminatingSemicolonContext): StellaType {
+        return checkType(ctx.expr_, ctx.expected)
     }
 }

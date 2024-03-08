@@ -1,7 +1,6 @@
 package grammar;
 
 import org.antlr.v4.runtime.ParserRuleContext;
-import org.antlr.v4.runtime.tree.ParseTreeVisitor;
 import org.pl.StellaType;
 
 import java.util.HashMap;
@@ -13,7 +12,6 @@ public class StellaRuleContext extends ParserRuleContext {
     public StellaRuleContext() {
     }
 
-
     public StellaRuleContext(ParserRuleContext parent, int invokingStateNumber) {
         super(parent, invokingStateNumber);
     }
@@ -23,15 +21,12 @@ public class StellaRuleContext extends ParserRuleContext {
         localVariables.putAll(parentContext.localVariables);
     }
 
-    public <T> T accept(ParseTreeVisitor<? extends T> visitor, StellaType expected) {
-        updateLocals();
-        this.expected = expected;
-        return visitor.visit(this);
+    public void addToParentCtx(String name, StellaType type) {
+        ((StellaRuleContext) parent).localVariables.put(name, type);
     }
 
-    @Override
-    public <T> T accept(ParseTreeVisitor<? extends T> visitor) {
-        return accept(visitor, null);
+    public void addAllToParentCtx() {
+        ((StellaRuleContext) parent).localVariables.putAll(localVariables);
     }
 
 
