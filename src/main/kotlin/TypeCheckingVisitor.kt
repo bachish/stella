@@ -6,32 +6,58 @@ import grammar.gen.StellaParser.*
 
 
 class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
-    private val mainName = "main"
+    private val mainFunName = "main"
 
-    private fun checkExpectation(ctx: StellaRuleContext, type: StellaType) {
-        if (ctx.expected != null && ctx.expected != type) {
-            throw TypeCheckingError.unexpectedType(ctx.expected, type, ctx)
+    /**
+     * After type inference compare inferred type with expected for this term
+     */
+    private fun checkExpectation(ctx: StellaRuleContext, actualType: StellaType) {
+        if (ctx.expected != null && ctx.expected != actualType) {
+            throw TypeCheckingError.unexpectedType(ctx.expected, actualType, ctx)
         }
     }
 
-
-    private fun inferType(ctx: StellaRuleContext): StellaType {
-        ctx.updateLocals()
-        ctx.expected = null
-        return ctx.accept(this)
+    private fun checkPatternType(ctx: StellaRuleContext, actualType: StellaType) {
+        if (ctx.expected != null && ctx.expected != actualType) {
+            throw TypeCheckingError.unexpectedType(ctx.expected, actualType, ctx)
+        }
     }
 
-    private fun checkType(ctx: StellaRuleContext, expectedType: StellaType?): StellaType {
+    private fun inferType(ctx: StellaRuleContext): StellaType {
+        return checkType(ctx, null)
+    }
+
+    private fun checkPatternType(
+        ctx: StellaRuleContext,
+        expectedType: StellaType?,
+        patternType: StellaType
+    ): StellaType {
+        ctx.patternExpectedType = patternType
+        return checkType(ctx, expectedType)
+    }
+
+    private fun checkType(
+        ctx: StellaRuleContext,
+        expectedType: StellaType?,
+        error: TypeCheckingError? = null
+    ): StellaType {
         ctx.updateLocals()
         ctx.expected = expectedType
-        return ctx.accept(this)
+        val actualType = ctx.accept(this)
+        if (expectedType != null && ctx.expected != actualType) {
+            if (error != null) {
+                throw error
+            }
+            assert(ctx.expected == actualType)
+        }
+        return actualType
     }
 
     override fun visitProgram(ctx: ProgramContext): StellaType {
         for (decl in ctx.decls) {
             inferType(decl)
         }
-        if (ctx.localVariables?.containsKey(mainName) == false) {
+        if (ctx.localVariables?.containsKey(mainFunName) == false) {
             throw TypeCheckingError.missingMain()
         }
         return StellaUnit
@@ -49,27 +75,11 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
         ctx.localDecls.forEach { inferType(it) }
 
         checkType(ctx.returnExpr, returnType)
+
+        if (funName == mainFunName && funType.args.size != 1) {
+            throw TypeCheckingError.incorrectArityOfMain(ctx)
+        }
         return funType
-    }
-
-    override fun visitDeclFunGeneric(ctx: DeclFunGenericContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitDeclTypeAlias(ctx: DeclTypeAliasContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitDeclExceptionType(ctx: DeclExceptionTypeContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitDeclExceptionVariant(ctx: DeclExceptionVariantContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitInlineAnnotation(ctx: InlineAnnotationContext): StellaType {
-        TODO("Not yet implemented")
     }
 
     override fun visitParamDecl(ctx: ParamDeclContext): StellaType {
@@ -77,14 +87,6 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
         val type: StellaType = inferType(ctx.paramType)
         ctx.addToParentCtx(name, type)
         return type
-    }
-
-    override fun visitFold(ctx: FoldContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitAdd(ctx: AddContext): StellaType {
-        TODO("Not yet implemented")
     }
 
 
@@ -95,13 +97,6 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
         return Bool
     }
 
-    override fun visitTypeRef(ctx: TypeRefContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitTypeRec(ctx: TypeRecContext): StellaType {
-        TODO("Not yet implemented")
-    }
 
     override fun visitTypeSum(ctx: TypeSumContext): StellaType {
         return Sum(inferType(ctx.left), inferType(ctx.right))
@@ -111,15 +106,11 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
         return Nat
     }
 
-    override fun visitTypeBottom(ctx: TypeBottomContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
     override fun visitTypeUnit(ctx: TypeUnitContext): StellaType {
         return StellaUnit
     }
 
-    private fun <T : StellaRuleContext> acceptAndGet(params: List<T>): List<StellaType> {
+    private fun <T : StellaRuleContext> inferTypes(params: List<T>): List<StellaType> {
         val paramTypes = params.map {
             inferType(it)
         }
@@ -132,29 +123,14 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      *      )? ')' '->' returnType = stellatype                        # TypeFun
      */
     override fun visitTypeFun(ctx: TypeFunContext): StellaType {
-        return Fun(acceptAndGet(ctx.paramTypes), inferType(ctx.returnType))
-    }
-
-    override fun visitTypeForAll(ctx: TypeForAllContext): StellaType {
-        TODO("Not yet implemented")
+        return Fun(inferTypes(ctx.paramTypes), inferType(ctx.returnType))
     }
 
     /**
      * '{' (types += stellatype (',' types += stellatype)*)? '}' # TypeTuple
      */
     override fun visitTypeTuple(ctx: TypeTupleContext): StellaType {
-        return Tuple(acceptAndGet(ctx.types))
-    }
-
-    override fun visitTypeTop(ctx: TypeTopContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    /**
-     * name = StellaIdent                                        # TypeVar
-     */
-    override fun visitTypeVar(ctx: TypeVarContext): StellaType {
-        TODO("Not yet implemented")
+        return Tuple(inferTypes(ctx.types))
     }
 
     /**
@@ -165,8 +141,13 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      *     )? '|>'                                                     # TypeVariant
      */
     override fun visitTypeVariant(ctx: TypeVariantContext): StellaType {
-        val type = Variant(ctx.fieldTypes
-            .associate { it.label.text to it?.type_?.accept(this) })
+        val types = ctx.fieldTypes
+            .associate {
+                it.updateLocals()
+                it.label.text to if (it.type_ != null) inferType(it.type_) else null
+            }
+        val labelOrder = ctx.fieldTypes.map { it.label.text }.toList()
+        val type = Variant(types, labelOrder)
         checkExpectation(ctx, type)
         return type
     }
@@ -230,11 +211,6 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
         return srcType
     }
 
-
-    override fun visitConstMemory(ctx: ConstMemoryContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
     /**
      * '[' (exprs += expr (',' exprs += expr)*)? ']' # List
      */
@@ -259,10 +235,6 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
             }
             return expectedType
         }
-    }
-
-    override fun visitTryCatch(ctx: TryCatchContext): StellaType {
-        TODO("Not yet implemented")
     }
 
     /**
@@ -295,11 +267,12 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
         val expectedType = ctx.expected
         if (ctx.expected == null) {
             val funType = inferType(ctx.expr_)
-            if (funType !is Fun) {
+            if (funType !is Fun || funType.args.size != 1) {
                 throw TypeCheckingError.notAFunction(ctx)
             }
-            if (funType.args.size != 1 || funType.args[0] != funType.ret) {
-                TypeCheckingError.notAFunction(ctx)
+            val argType = funType.args[0]
+            if (argType != funType.ret) {
+                throw TypeCheckingError.unexpectedType(Fun(listOf(argType), argType), funType, ctx)
             }
             return funType.ret
 
@@ -317,20 +290,17 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
         return checkType(ctx.body, ctx.expected)
     }
 
+    override fun visitParenthesisedPattern(ctx: ParenthesisedPatternContext): StellaType {
+        return checkType(ctx.pattern_, ctx.expected)
+    }
+
+
     /**
      * CONSTANTS
      */
     override fun visitConstTrue(ctx: ConstTrueContext): StellaType {
         checkExpectation(ctx, Bool)
         return Bool
-    }
-
-    override fun visitSubtract(ctx: SubtractContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitTypeCast(ctx: TypeCastContext): StellaType {
-        TODO("Not yet implemented")
     }
 
     override fun visitConstFalse(ctx: ConstFalseContext): StellaType {
@@ -341,10 +311,6 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
     override fun visitConstUnit(ctx: ConstUnitContext): StellaType {
         checkExpectation(ctx, StellaUnit)
         return StellaUnit
-    }
-
-    override fun visitSequence(ctx: SequenceContext): StellaType {
-        TODO("Not yet implemented")
     }
 
     override fun visitConstInt(ctx: ConstIntContext): StellaType {
@@ -375,7 +341,8 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
         if (ctx.rhs == null) {
             throw TypeCheckingError.missingDataForVariant(ctx, varLabel)
         }
-        return checkType(ctx.rhs, expectedVarType)
+        checkType(ctx.rhs, expectedVarType)
+        return expectedType
     }
 
 
@@ -390,10 +357,6 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
         val varType = ctx.localVariables[varName]!!
         checkExpectation(ctx, varType)
         return varType
-    }
-
-    override fun visitTypeAbstraction(ctx: TypeAbstractionContext): StellaType {
-        TODO("Not yet implemented")
     }
 
     override fun visitInl(ctx: InlContext): StellaType {
@@ -421,7 +384,16 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      *     )? '}'                                         # Match
      */
     override fun visitMatch(ctx: MatchContext): StellaType {
-        TODO("Not yet implemented")
+        if (ctx.cases.size == 0) {
+            throw TypeCheckingError.emptyMatching(ctx)
+        }
+        val patternType = inferType(ctx.expr_)
+        val expectedBodyType = checkPatternType(ctx.cases[0], ctx.expected, patternType)
+        for (case in ctx.cases.asSequence().drop(1)) {
+            checkPatternType(case, expectedBodyType, patternType)
+        }
+        ExhaustiveChecker(ctx).check(ctx.cases.map { it.pattern_ }, patternType)
+        return expectedBodyType
     }
 
 
@@ -457,28 +429,78 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
         TODO("Not yet implemented")
     }
 
+    /**
+     * matchCase: pattern_ = pattern '=>' expr_ = expr;
+     */
     override fun visitMatchCase(ctx: MatchCaseContext): StellaType {
-        TODO("Not yet implemented")
+        checkType(ctx.pattern_, ctx.patternExpectedType)
+        return checkType(ctx.expr_, ctx.expected)
     }
+
 
     override fun visitPatternCons(ctx: PatternConsContext): StellaType {
         TODO("Not yet implemented")
     }
 
+    /**
+     *  '{' (patterns += pattern (',' patterns += pattern)*)? '}' # PatternTuple
+     */
     override fun visitPatternTuple(ctx: PatternTupleContext): StellaType {
-        TODO("Not yet implemented")
+        val pattType = ctx.expected
+        if (pattType !is Tuple) {
+            throw TypeCheckingError.errorMatchingPattern(ctx)
+        }
+        pattType.checkLength(ctx.patterns.size, TypeCheckingError.errorMatchingPattern(ctx))
+        for ((expect, patt) in pattType.items.zip(ctx.patterns)) {
+            checkType(patt, expect)
+        }
+        return ctx.expected
     }
 
     override fun visitPatternList(ctx: PatternListContext): StellaType {
         TODO("Not yet implemented")
     }
 
+    /**
+     *'{' (  patterns += labelledPattern (
+     *             ',' patterns += labelledPattern
+     *         )*
+     *     )? '}'                                                      # PatternRecord
+     */
     override fun visitPatternRecord(ctx: PatternRecordContext): StellaType {
-        TODO("Not yet implemented")
+        val pattType = ctx.expected
+        if (pattType !is Record) {
+            throw TypeCheckingError.errorMatchingPattern(ctx)
+        }
+
+        for ((expect, patt) in pattType.items.values.zip(ctx.patterns)) {
+            checkType(patt, expect)
+        }
+        return ctx.expected
     }
 
+    /**
+     *    '<|' label = StellaIdent ('=' pattern_ = pattern)? '|>'     # PatternVariant
+     */
     override fun visitPatternVariant(ctx: PatternVariantContext): StellaType {
-        TODO("Not yet implemented")
+        val label: String = ctx.label.text
+        val pattType = ctx.expected
+        if (pattType !is Variant) {
+            throw TypeCheckingError.errorMatchingPattern(ctx)
+        }
+        val type = pattType.getType(label, TypeCheckingError.errorMatchingPattern(ctx))
+        if (type == null && ctx.pattern_ == null) {
+            return ctx.expected
+        }
+        if(type == null){
+            throw TypeCheckingError.unexpectedNonNullaryVariantPattern(ctx, label)
+        }
+        if(ctx.pattern_ == null){
+            throw TypeCheckingError.unexpectedNullaryVariantPattern(ctx, label)
+        }
+        checkType(ctx.pattern_, type)
+        ctx.addAllToParentCtx()
+        return ctx.expected
     }
 
     override fun visitPatternAsc(ctx: PatternAscContext): StellaType {
@@ -490,15 +512,30 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
     }
 
     override fun visitPatternInr(ctx: PatternInrContext): StellaType {
-        TODO("Not yet implemented")
+        val expectedType = ctx.expected
+        if (expectedType !is Sum) {
+            throw TypeCheckingError.errorMatchingPattern(ctx)
+        }
+        checkType(ctx.pattern_, expectedType.right)
+        ctx.addAllToParentCtx()
+        return ctx.expected
     }
 
     override fun visitPatternTrue(ctx: PatternTrueContext): StellaType {
-        TODO("Not yet implemented")
+        if (ctx.expected != null && ctx.expected !is Bool) {
+            throw TypeCheckingError.errorMatchingPattern(ctx)
+        }
+        return Bool
     }
 
     override fun visitPatternInl(ctx: PatternInlContext): StellaType {
-        TODO("Not yet implemented")
+        val expectedType = ctx.expected
+        if (expectedType !is Sum) {
+            throw TypeCheckingError.errorMatchingPattern(ctx)
+        }
+        checkType(ctx.pattern_, expectedType.left)
+        ctx.addAllToParentCtx()
+        return ctx.expected
     }
 
     override fun visitPatternVar(ctx: PatternVarContext): StellaType {
@@ -535,7 +572,8 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
             }
             return listType.elemType
         } else {
-            return checkType(ctx.list, StellaList(expectedType))
+            checkType(ctx.list, StellaList(expectedType))
+            return expectedType
         }
     }
 
@@ -595,17 +633,12 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
             throw TypeCheckingError.incorrectNumberOfArgs(ctx)
         }
 
-
         funType.args.zip(ctx.args).stream().forEach { (expType, actCtx) ->
             checkType(actCtx, expType)
         }
 
         checkExpectation(ctx, funType.ret)
         return funType.ret
-    }
-
-    override fun visitDeref(ctx: DerefContext): StellaType {
-        TODO("Not yet implemented")
     }
 
     /**
@@ -616,7 +649,7 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
     override fun visitAbstraction(ctx: AbstractionContext): StellaType {
         val expected = ctx.expected
         if (expected == null) {
-            return Fun(acceptAndGet(ctx.paramDecls), inferType(ctx.returnExpr))
+            return Fun(inferTypes(ctx.paramDecls), inferType(ctx.returnExpr))
         } else {
             if (expected !is Fun) {
                 throw TypeCheckingError.unexpectedLambda(ctx)
@@ -625,7 +658,9 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
                 throw TypeCheckingError.unexpectedNumberOfParametersInLambda(ctx)
             }
 
-            ctx.paramDecls.zip(expected.args).forEach { (decl, exp) -> checkType(decl, exp) }
+            ctx.paramDecls.zip(expected.args).forEach { (decl, exp) ->
+                checkType(decl, exp, TypeCheckingError.unexpectedTypeForParameter(ctx))
+            }
 
             checkType(ctx.returnExpr, expected.ret)
             return expected
@@ -644,9 +679,8 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
             if (expectedType !is Tuple) {
                 throw TypeCheckingError.unexpectedTuple(ctx)
             }
-            if (expectedType.items.size != ctx.exprs.size) {
-                throw TypeCheckingError.unexpectedTupleLength(ctx)
-            }
+            expectedType.checkLength(ctx.exprs.size, TypeCheckingError.unexpectedTupleLength(ctx))
+
             for ((exp, decl) in expectedType.items.zip(ctx.exprs)) {
                 checkType(decl, exp)
             }
@@ -683,26 +717,17 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
             if (missingLabels.isNotEmpty()) {
                 throw TypeCheckingError.missingRecordField(ctx, missingLabels.first())
             }
-            ctx.bindings.forEach { checkType(it.rhs, expectedType.items[it.name.text]!!) }
+            ctx.bindings.forEach {
+                it.updateLocals()
+                checkType(it.rhs, expectedType.items[it.name.text]!!)
+            }
 
             return expectedType
         }
     }
 
 
-    override fun visitTypeApplication(ctx: TypeApplicationContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
     override fun visitLetRec(ctx: LetRecContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitTryWith(ctx: TryWithContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitPred(ctx: PredContext): StellaType {
         TODO("Not yet implemented")
     }
 
@@ -724,14 +749,6 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
         val retType = checkType(ctx.initial, ctx.expected)
         checkType(ctx.step, Fun(listOf(Nat), Fun(listOf(retType), retType)))
         return retType
-    }
-
-    override fun visitUnfold(ctx: UnfoldContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitRef(ctx: RefContext): StellaType {
-        TODO("Not yet implemented")
     }
 
     /**

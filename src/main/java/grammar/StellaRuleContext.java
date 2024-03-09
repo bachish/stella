@@ -9,6 +9,14 @@ public class StellaRuleContext extends ParserRuleContext {
     public HashMap<String, StellaType> localVariables = new HashMap<>();
     public StellaType expected = null;
 
+    /**
+     * In pattern  matching we have two types:
+     * 1. type of pattern (type of matching argument)
+     * 2. type of pattern-matching body (type of matching result)
+     * This field contains a first type
+     */
+    public StellaType patternExpectedType = null;
+
     public StellaRuleContext() {
     }
 
@@ -20,6 +28,7 @@ public class StellaRuleContext extends ParserRuleContext {
         StellaRuleContext parentContext = (StellaRuleContext) parent;
         localVariables.putAll(parentContext.localVariables);
     }
+
 
     public void addToParentCtx(String name, StellaType type) {
         ((StellaRuleContext) parent).localVariables.put(name, type);
