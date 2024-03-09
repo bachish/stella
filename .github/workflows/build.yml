@@ -20,7 +20,7 @@ jobs:
 
       - name: Generate ANTLR files
         run: |
-          sudo apt-get install antlr
+          sudo apt-get install antlr4
           ./generate_parser.sh
 
       - name: Build with Gradle
