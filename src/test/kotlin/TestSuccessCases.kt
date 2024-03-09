@@ -9,10 +9,9 @@ import kotlin.test.assertEquals
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TestSuccessCases {
+    private val unsupportedTests = listOf<String>()
+
     private fun checkFile(code: String) {
-        if( code.contains("letrec") ){
-            return
-        }
         println(code)
         assertEquals(0, TypeChecker.checkUnsafe(code.byteInputStream()))
     }
@@ -22,9 +21,15 @@ class TestSuccessCases {
     fun testAll(file: File) {
         checkFile(file.readText())
     }
+
     private fun listAllFiles(): Stream<File>? {
-        return Arrays.stream(Objects.requireNonNull<Array<File>>(File(testDataPath).listFiles()))
+        return Arrays.stream(Objects.requireNonNull<Array<File>>(
+            File(testDataPath)
+                .listFiles()
+                .filter { file -> !unsupportedTests.contains(file.name) }
+                .toTypedArray()
+        ))
     }
 
-    private val testDataPath: String = "src/test/resources/stella-tests/ok";
+    private val testDataPath: String = "src/test/resources/stella-tests/ok"
 }

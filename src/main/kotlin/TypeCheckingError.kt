@@ -237,10 +237,10 @@ class TypeCheckingError private constructor(val errorTag: String, message: Strin
         }
 
         /**
-         *  образец в match-выражении не соответствует
+         * Образец в match-выражении не соответствует
          * типу разбираемого выражения;
          */
-        fun errorMatchingPattern(ctx: StellaRuleContext): TypeCheckingError {
+        fun unexpectedPatternForType(ctx: StellaRuleContext): TypeCheckingError {
             return TypeCheckingError("ERROR_UNEXPECTED_PATTERN_FOR_TYPE", ctx)
         }
 
@@ -264,6 +264,13 @@ class TypeCheckingError private constructor(val errorTag: String, message: Strin
             return TypeCheckingError("ERROR_UNEXPECTED_NUMBER_OF_PARAMETERS_IN_LAMBDA", ctx)
         }
 
+        /**
+         * letrec
+         */
+
+        fun ambiguousPatternType(ctx: StellaRuleContext): TypeCheckingError {
+            return TypeCheckingError("ERROR_AMBIGUOUS_PATTERN_TYPE", ctx)
+        }
 
     }
 

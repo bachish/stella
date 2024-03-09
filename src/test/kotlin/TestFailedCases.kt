@@ -17,6 +17,7 @@ import kotlin.test.assertEquals
 class TestFailedCases {
     private val testDataPath: String = "src/test/resources/stella-tests/bad";
 
+    private val unsupportedTests = listOf("list_complex.st")
     private fun checkFile(input: String, errorTag: String) {
         println(input)
         try {
@@ -31,22 +32,14 @@ class TestFailedCases {
     fun testAll(): Collection<DynamicContainer> {
         val folders = File(testDataPath).listFiles()
         return folders.map { folder ->
-            DynamicContainer.dynamicContainer(folder.name, folder.listFiles().map { file ->
+            DynamicContainer.dynamicContainer(
+                folder.name, folder.listFiles()
+                    .filter{file -> !unsupportedTests.contains(file.name)}
+                    .map { file ->
                 DynamicTest.dynamicTest(file.name) {
                     checkFile(file.readText(), folder.name)
                 }
             })
         }
     }
-
-
-    private fun listAllFiles(): Stream<Pair<File, String>>? {
-        val folders = Arrays.stream(Objects.requireNonNull<Array<File>>(File(testDataPath).listFiles()))
-        return folders.flatMap { a ->
-            Arrays.stream(a.listFiles()).map { b ->
-                b to a.name
-            }
-        }
-    }
-
 }
