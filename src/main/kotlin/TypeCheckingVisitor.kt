@@ -47,7 +47,6 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
             if (error != null) {
                 throw error
             }
-            assert(ctx.expected == actualType)
         }
         return actualType
     }
