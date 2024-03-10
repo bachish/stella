@@ -26,8 +26,8 @@ class TestSuccessCases {
         return Arrays.stream(Objects.requireNonNull<Array<File>>(
             File(testDataPath)
                 .listFiles()
-                .filter { file -> !unsupportedTests.contains(file.name) }
-                .toTypedArray()
+                ?.filter { file -> !unsupportedTests.contains(file.name) }
+                ?.toTypedArray() ?: throw Exception("folder $testDataPath not found")
         ))
     }
 
