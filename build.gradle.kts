@@ -3,6 +3,8 @@ plugins {
     java
     kotlin("jvm") version "1.9.21"
     id("com.strumenta.antlr-kotlin") version "1.0.0-RC2"
+    //for building an executable files
+    application
 }
 
 group = "org.pl"
@@ -28,5 +30,11 @@ tasks.test {
 }
 kotlin {
     jvmToolchain(11)
+}
+
+
+
+application {
+    mainClass = "org.pl.MainKt"
 }
 
