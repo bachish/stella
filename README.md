@@ -1,4 +1,6 @@
 # stella
+To run tests load them from git submodules.
+
 ## Build project
 Build project with gradle
 ```

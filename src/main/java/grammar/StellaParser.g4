@@ -49,6 +49,8 @@ expr:
     | 'panic!'                    # Panic
     | 'throw' '(' expr_=expr ')'  # Throw
     | 'try' '{' tryExpr=expr '}' 'catch' '{' pat=pattern '=>' fallbackExpr=expr '}'  # TryCatch
+    | 'try' '{' tryExpr=expr '}' 'cast' 'as' type_=stellatype '{' pattern_=pattern '=>' expr_=expr '}'
+        'with' '{' fallbackExpr=expr '}'                             # TryCastAs
     | 'try' '{' tryExpr=expr '}' 'with' '{' fallbackExpr=expr '}'  # TryWith
     | 'inl' '(' expr_=expr ')'                     # Inl
     | 'inr' '(' expr_=expr ')'                     # Inr
@@ -101,14 +103,13 @@ expr:
     | 'if' condition = expr 'then' thenExpr = expr 'else' elseExpr = expr # If
     | expr1 = expr ';' expr2 = expr # Sequence
     | 'let' patternBindings+=patternBinding (',' patternBindings+=patternBinding)* 'in' body = expr           # Let
-    | 'letrec' patternBindings+=letRecPatternBinding (',' patternBindings+=letRecPatternBinding)* 'in' body = expr           # LetRec
+    | 'letrec' patternBindings+=patternBinding (',' patternBindings+=patternBinding)* 'in' body = expr           # LetRec
     | 'generic' '[' generics += StellaIdent (',' generics += StellaIdent)* ']' expr_ = expr                           # TypeAbstraction
     | '(' expr_ = expr ')'                                                        # ParenthesisedExpr
     | expr_ = expr ';' # TerminatingSemicolon
     ;
 
 patternBinding: pat=pattern '=' rhs=expr ;
-letRecPatternBinding: pat=pattern '=' rhs=expr ;
 
 binding: name = StellaIdent '=' rhs = expr;
 
@@ -133,6 +134,7 @@ pattern:
     | 'succ' '(' pattern_ = pattern ')'                         # PatternSucc
     | name = StellaIdent                                        # PatternVar
     | pattern_ = pattern 'as' type_ = stellatype                # PatternAsc
+    | pattern_ = pattern 'cast' 'as' type_ = stellatype         # PatternCastAs
     | '(' pattern_ = pattern ')'                                # ParenthesisedPattern;
 
 labelledPattern: label = StellaIdent '=' pattern_ = pattern;

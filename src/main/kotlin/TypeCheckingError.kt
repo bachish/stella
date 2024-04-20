@@ -46,7 +46,7 @@ class TypeCheckingError private constructor(val errorTag: String, message: Strin
 
         fun ambiguousList(ctx: StellaRuleContext): TypeCheckingError {
             return TypeCheckingError(
-                "ERROR_AMBIGUOUS_LIST",
+                "ERROR_AMBIGUOUS_LIST_TYPE",
                 ctx
             )
         }

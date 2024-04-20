@@ -68,6 +68,7 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
         val paramTypes = ctx.paramDecls.map { inferType(it) }
         val funType = Fun(paramTypes, returnType)
 
+        ctx.localVariables.put(funName, funType)
         ctx.addToParentCtx(funName, funType)
 
         ctx.localDecls.forEach { inferType(it) }
@@ -244,6 +245,10 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
         }
     }
 
+    override fun visitTryCastAs(ctx: TryCastAsContext?): StellaType {
+        TODO("Not yet implemented")
+    }
+
     /**
      * expr_ = expr '.' index = INTEGER   # DotTuple
      */
@@ -293,7 +298,12 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      * 'let' patternBindings+=patternBinding (',' patternBindings+=patternBinding)* 'in' body = expr           # Let
      */
     override fun visitLet(ctx: LetContext): StellaType {
-        ctx.patternBindings.forEach { inferType(it) }
+        ctx.patternBindings.forEach { pb ->
+            pb.updateLocals()
+            val exprType = inferType(pb.rhs)
+            checkType(pb.pat, exprType)
+            pb.addAllToParentCtx()
+        }
         return checkType(ctx.body, ctx.expected)
     }
 
@@ -599,7 +609,6 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
             throw TypeCheckingError.ambiguousPatternType(ctx)
         }
         ctx.addToParentCtx(ctx.name.text, ctx.expected)
-        ctx.addAllToParentCtx()
         return ctx.expected
     }
 
@@ -624,6 +633,10 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
             throw TypeCheckingError.unexpectedPatternForType(ctx)
         }
         return StellaUnit
+    }
+
+    override fun visitPatternCastAs(ctx: PatternCastAsContext?): StellaType {
+        TODO("Not yet implemented")
     }
 
     /**
@@ -779,7 +792,7 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
         val items: Map<String, StellaType>
         val labels: List<String> = ctx.bindings.map { it.name.text }
         if (expectedType == null) {
-            items = ctx.bindings.associate { it.name.text to inferType(it.rhs) }
+            items = ctx.bindings.associate { it.updateLocals() ; it.name.text to inferType(it.rhs) }
             return Record(items, labels)
         } else {
             if (expectedType !is Record) {
@@ -810,18 +823,14 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
      * Instead of simple rec, which arguments types can be inferred from rhs
      */
     override fun visitLetRec(ctx: LetRecContext): StellaType {
-        ctx.patternBindings.forEach { inferType(it) }
+        ctx.patternBindings.forEach { pb ->
+            pb.updateLocals()
+            inferType(pb.pat)
+            val exprType = inferType(pb.rhs)
+            checkType(pb.pat, exprType)
+            pb.addAllToParentCtx()
+        }
         return checkType(ctx.body, ctx.expected)
-    }
-
-    /**
-     * letRecPatternBinding: pat=pattern '=' rhs=expr ;
-     */
-    override fun visitLetRecPatternBinding(ctx: LetRecPatternBindingContext): StellaType {
-        val pattType = inferType(ctx.pattern())
-        checkType(ctx.rhs, pattType)
-        ctx.addAllToParentCtx()
-        return pattType
     }
 
 
