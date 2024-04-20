@@ -2,17 +2,81 @@ package org.pl
 
 import grammar.StellaRuleContext
 import grammar.gen.StellaParser.*
+import org.pl.TypeCheckingError.Companion.exceptionTypeNotDecl
 
 
 class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
     private val mainFunName = "main"
+    private var exceptionType: StellaType? = null
+    private var structuralSubtyping = false
+    private var bottom = false
+
+    private fun getExceptionType(ctx: StellaRuleContext): StellaType {
+        return exceptionType ?: throw exceptionTypeNotDecl(ctx)
+    }
+
+    private fun getExpected(ctx: StellaRuleContext, error: TypeCheckingError): StellaType {
+        val exp = ctx.expected
+        if (exp == null) {
+            if (bottom) {
+                return Bot
+            }
+            throw error
+        }
+        return exp
+    }
 
     /**
      * After type inference compare inferred type with expected for this term
      */
     private fun checkExpectation(ctx: StellaRuleContext, actualType: StellaType) {
         if (ctx.expected != null && ctx.expected != actualType) {
-            throw TypeCheckingError.unexpectedType(ctx.expected, actualType, ctx)
+            if (structuralSubtyping) {
+                checkSubtyping(ctx.expected, actualType, ctx)
+            } else {
+                throw TypeCheckingError.unexpectedType(ctx.expected, actualType, ctx)
+            }
+        }
+    }
+
+    private fun checkSubtyping(parent: StellaType, child: StellaType, ctx: StellaRuleContext) {
+        if (parent is Top || parent == child || child == Bot) return
+        else if (parent is Tuple && child is Tuple) {
+            if (parent.items.size != child.items.size) {
+                throw TypeCheckingError.unexpectedTupleLength(ctx)
+            }
+            parent.items.zip(child.items).forEach { (p, c) -> checkSubtyping(p, c, ctx) }
+        } else if (parent is Record && child is Record) {
+            parent.items.forEach { (name, type) ->
+                val subtype = child.items[name] ?: throw TypeCheckingError.missingRecordField(ctx, name)
+                checkSubtyping(type, subtype, ctx)
+            }
+        } else if (parent is Variant && child is Variant) {
+            child.labelToType.forEach { (label, subtype) ->
+                if (!parent.labelToType.contains(label)) {
+                    throw TypeCheckingError.unexpectedVariantLabel(ctx, label)
+                }
+                val type = parent.labelToType[label]
+                if (subtype == null && type != null) {
+                    throw TypeCheckingError.missingTypeForLabel(ctx, label)
+                }
+                if (subtype != null && type != null) {
+                    checkSubtyping(type, subtype, ctx)
+                }
+            }
+        } else if (parent is Fun && child is Fun) {
+            checkSubtyping(parent.ret, child.ret, ctx)
+            if (parent.args.size != child.args.size) {
+                throw TypeCheckingError.incorrectNumberOfArgs(ctx)
+            }
+            child.args.zip(parent.args).forEach { (subtype, type) ->
+                checkSubtyping(subtype, type, ctx)
+            }
+        } else if (parent is Sum && child is Sum) {
+            checkSubtyping(parent.left, child.left, ctx)
+            checkSubtyping(parent.right, child.right, ctx)
+        } else {
+            throw TypeCheckingError.unexpectedSubtype(parent, child, ctx)
         }
     }
 
@@ -24,6 +88,17 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
 
     private fun inferType(ctx: StellaRuleContext): StellaType {
         return checkType(ctx, null)
+    }
+
+    override fun visitAnExtension(ctx: AnExtensionContext): StellaType {
+        if (ctx.extensionNames.any { it.text == "#structural-subtyping" }) {
+            structuralSubtyping = true
+        }
+        if (ctx.extensionNames.any { it.text == "#ambiguous-type-as-bottom" }) {
+            bottom = true
+        }
+
+        return StellaUnit
     }
 
     private fun checkPatternType(
@@ -52,6 +127,9 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
     }
 
     override fun visitProgram(ctx: ProgramContext): StellaType {
+        for (extension in ctx.extensions) {
+            inferType(extension)
+        }
         for (decl in ctx.decls) {
             inferType(decl)
         }
@@ -379,7 +457,11 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
     }
 
     override fun visitInl(ctx: InlContext): StellaType {
-        val expectedType = ctx.expected ?: throw TypeCheckingError.ambiguousSum(ctx)
+        val expectedType = getExpected(ctx, TypeCheckingError.ambiguousSum(ctx))
+        if (expectedType == Bot) {
+            val left = inferType(ctx.expr_)
+            return Sum(left, Bot)
+        }
         if (expectedType !is Sum) {
             throw TypeCheckingError.unexpectedInj(ctx)
         }
@@ -389,7 +471,11 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
 
 
     override fun visitInr(ctx: InrContext): StellaType {
-        val expectedType = ctx.expected ?: throw TypeCheckingError.ambiguousSum(ctx)
+        val expectedType = getExpected(ctx, TypeCheckingError.ambiguousSum(ctx))
+        if (expectedType == Bot) {
+            val right = inferType(ctx.expr_)
+            return Sum(Bot, right)
+        }
         if (expectedType !is Sum) {
             throw TypeCheckingError.unexpectedInj(ctx)
         }
@@ -792,14 +878,14 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
         val items: Map<String, StellaType>
         val labels: List<String> = ctx.bindings.map { it.name.text }
         if (expectedType == null) {
-            items = ctx.bindings.associate { it.updateLocals() ; it.name.text to inferType(it.rhs) }
+            items = ctx.bindings.associate { it.updateLocals(); it.name.text to inferType(it.rhs) }
             return Record(items, labels)
         } else {
             if (expectedType !is Record) {
                 throw TypeCheckingError.unexpectedRecord(ctx)
             }
             val unexpectedLabels = labelsCount.keys.subtract(expectedType.items.keys)
-            if (unexpectedLabels.isNotEmpty()) {
+            if (!structuralSubtyping && unexpectedLabels.isNotEmpty()) {
                 throw TypeCheckingError.unexpectedRecordField(ctx, unexpectedLabels.first())
             }
             val missingLabels = expectedType.items.keys.subtract(labelsCount.keys)
@@ -808,7 +894,8 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
             }
             ctx.bindings.forEach {
                 it.updateLocals()
-                checkType(it.rhs, expectedType.items[it.name.text]!!)
+                val exp = expectedType.items[it.name.text]
+                checkType(it.rhs, exp)
             }
 
             return expectedType
@@ -876,4 +963,119 @@ class TypeCheckingVisitor : TypeCheckingCommonVisitor() {
     override fun visitTerminatingSemicolon(ctx: TerminatingSemicolonContext): StellaType {
         return checkType(ctx.expr_, ctx.expected)
     }
+
+    override fun visitSequence(ctx: SequenceContext): StellaType {
+        checkType(ctx.expr1, StellaUnit)
+        return checkType(ctx.expr2, ctx.expected)
+    }
+
+    override fun visitTypeRef(ctx: TypeRefContext): StellaType {
+        return Ref(inferType(ctx.type_))
+    }
+
+
+    override fun visitRef(ctx: RefContext): StellaType {
+        val expected = ctx.expected
+        if (expected != null) {
+            if (expected == Top) {
+                return checkType(ctx.expr_, Top)
+            }
+            if (expected !is Ref) {
+                throw TypeCheckingError.unexpectedRef(ctx)
+            }
+            checkType(ctx.expr_, expected.type)
+            return expected
+        }
+        val type = inferType(ctx.expr_)
+        return Ref(type)
+    }
+
+    override fun visitAssign(ctx: AssignContext): StellaType {
+        checkExpectation(ctx, StellaUnit)
+        val type = inferType(ctx.lhs)
+        if (type !is Ref) {
+            throw TypeCheckingError.notARef(ctx.lhs)
+        }
+        checkType(ctx.rhs, type.type)
+        return StellaUnit
+    }
+
+    override fun visitDeref(ctx: DerefContext): StellaType {
+        if (ctx.expected != null) {
+            checkType(ctx.expr_, Ref(ctx.expected))
+            return ctx.expected
+        }
+        val type = inferType(ctx.expr_)
+        if (type !is Ref) {
+            throw TypeCheckingError.notARef(ctx.expr_)
+        }
+        return type.type
+    }
+
+    override fun visitConstMemory(ctx: ConstMemoryContext): StellaType {
+        val exp = getExpected(ctx, TypeCheckingError.ambiguousRef(ctx))
+        if (exp !is Ref && exp !is Top) {
+            throw TypeCheckingError.unexpectedAddr(ctx)
+        }
+        return exp
+    }
+
+    /**
+     * Errors
+     */
+
+    override fun visitPanic(ctx: PanicContext): StellaType {
+        return getExpected(ctx, TypeCheckingError.ambiguousPanic(ctx))
+    }
+
+    /**
+     *  'exception' 'type' '=' exceptionType=stellatype
+     */
+    override fun visitDeclExceptionType(ctx: DeclExceptionTypeContext): StellaType {
+        val type = ctx.exceptionType.accept(this)
+        exceptionType = type
+        return type
+    }
+
+
+    override fun visitThrow(ctx: ThrowContext): StellaType {
+        val type = getExpected(ctx, TypeCheckingError.ambiguousThrowType(ctx))
+        checkType(ctx.expr_, getExceptionType(ctx))
+        return type
+    }
+
+
+    override fun visitTryWith(ctx: TryWithContext): StellaType {
+        val type = checkType(ctx.tryExpr, ctx.expected)
+        return checkType(ctx.fallbackExpr, type)
+    }
+
+    override fun visitTryCatch(ctx: TryCatchContext): StellaType {
+        val type = checkType(ctx.tryExpr, ctx.expected)
+        checkType(ctx.pat, getExceptionType(ctx))
+        return checkType(ctx.fallbackExpr, type)
+    }
+
+
+    override fun visitDeclExceptionVariant(ctx: DeclExceptionVariantContext): StellaType {
+        val type = ctx.variantType.accept(this)
+        val name = ctx.name.text
+        var et = exceptionType
+        if (et == null) {
+            et = Variant(mapOf(name to type), listOf(name))
+        } else if (et !is Variant) {
+            throw TypeCheckingError.unmatchedErrorTypes(ctx)
+        } else et = Variant(et.labelToType.plus(name to type), et.labelOrder + name)
+        exceptionType = et
+        return et
+    }
+
+    override fun visitTypeTop(ctx: TypeTopContext): StellaType {
+        return Top
+    }
+
+    override fun visitTypeBottom(ctx: TypeBottomContext): StellaType {
+        return Bot
+    }
+
 }

@@ -1,7 +1,5 @@
 package org.pl
 
-import grammar.StellaRuleContext
-
 abstract class StellaType
 
 data object Bool : StellaType()
@@ -39,7 +37,9 @@ data class Variant(val labelToType: Map<String, StellaType?>, val labelOrder: Li
     }
 }
 
+data class Ref(val type: StellaType) : StellaType()
 
-
+object Top: StellaType()
+object Bot: StellaType()
 
 

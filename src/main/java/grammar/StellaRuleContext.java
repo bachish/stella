@@ -2,8 +2,10 @@ package grammar;
 
 import org.antlr.v4.runtime.ParserRuleContext;
 import org.pl.StellaType;
+import org.pl.TypeCheckingError;
 
 import java.util.HashMap;
+import java.util.HashSet;
 
 public class StellaRuleContext extends ParserRuleContext {
     public HashMap<String, StellaType> localVariables = new HashMap<>();

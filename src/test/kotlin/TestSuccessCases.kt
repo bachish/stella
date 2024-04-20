@@ -1,13 +1,9 @@
-import org.junit.jupiter.api.TestInstance
-import org.junit.jupiter.params.ParameterizedTest
-import org.junit.jupiter.params.provider.MethodSource
+import org.junit.jupiter.api.DynamicTest
+import org.junit.jupiter.api.TestFactory
 import org.pl.TypeChecker
 import java.io.File
-import java.util.*
-import java.util.stream.Stream
 import kotlin.test.assertEquals
 
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class TestSuccessCases {
     private val unsupportedTests = listOf<String>()
 
@@ -16,19 +12,19 @@ class TestSuccessCases {
         assertEquals(0, TypeChecker.checkUnsafe(code.byteInputStream()))
     }
 
-    @ParameterizedTest
-    @MethodSource("listAllFiles")
-    fun testAll(file: File) {
-        checkFile(file.readText())
-    }
 
-    private fun listAllFiles(): Stream<File>? {
-        return Arrays.stream(Objects.requireNonNull<Array<File>>(
-            File(testDataPath)
-                .listFiles()
-                ?.filter { file -> !unsupportedTests.contains(file.name) }
-                ?.toTypedArray() ?: throw Exception("folder $testDataPath not found")
-        ))
+    @TestFactory
+    fun testAll(): Collection<DynamicTest> {
+        val files = File(testDataPath).listFiles()
+        if (files != null) {
+            return files.map { file ->
+                DynamicTest.dynamicTest(file.name) {
+                    checkFile(file.readText())
+                }
+            }
+        } else {
+            throw Exception("test folder $testDataPath not found")
+        }
     }
 
     private val testDataPath: String = "src/test/resources/stella-tests/ok"

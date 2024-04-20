@@ -6,6 +6,7 @@ import org.antlr.v4.runtime.tree.AbstractParseTreeVisitor
 
 abstract class TypeCheckingCommonVisitor : StellaParserVisitor<StellaType>, AbstractParseTreeVisitor<StellaType>() {
 
+
     override fun visitStart_Expr(ctx: StellaParser.Start_ExprContext): StellaType {
         return visitChildren(ctx)
     }
@@ -19,10 +20,6 @@ abstract class TypeCheckingCommonVisitor : StellaParserVisitor<StellaType>, Abst
     }
 
     override fun visitLanguageCore(ctx: StellaParser.LanguageCoreContext): StellaType {
-        return StellaUnit
-    }
-
-    override fun visitAnExtension(ctx: StellaParser.AnExtensionContext): StellaType {
         return StellaUnit
     }
 
@@ -47,10 +44,6 @@ abstract class TypeCheckingCommonVisitor : StellaParserVisitor<StellaType>, Abst
         TODO("Not yet implemented")
     }
 
-    override fun visitPanic(ctx: StellaParser.PanicContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
     override fun visitLessThanOrEqual(ctx: StellaParser.LessThanOrEqualContext): StellaType {
         TODO("Not yet implemented")
     }
@@ -71,18 +64,9 @@ abstract class TypeCheckingCommonVisitor : StellaParserVisitor<StellaType>, Abst
         TODO("Not yet implemented")
     }
 
-    override fun visitThrow(ctx: StellaParser.ThrowContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
     override fun visitMultiply(ctx: StellaParser.MultiplyContext): StellaType {
         TODO("Not yet implemented")
     }
-
-    override fun visitAssign(ctx: StellaParser.AssignContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
 
     override fun visitRecordFieldType(ctx: StellaParser.RecordFieldTypeContext): StellaType {
         TODO("Not yet implemented")
@@ -103,20 +87,7 @@ abstract class TypeCheckingCommonVisitor : StellaParserVisitor<StellaType>, Abst
         TODO("Not yet implemented")
     }
 
-    override fun visitTypeRef(ctx: StellaParser.TypeRefContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitTypeBottom(ctx: StellaParser.TypeBottomContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
     override fun visitTypeForAll(ctx: StellaParser.TypeForAllContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-
-    override fun visitTypeTop(ctx: StellaParser.TypeTopContext): StellaType {
         TODO("Not yet implemented")
     }
 
@@ -124,14 +95,6 @@ abstract class TypeCheckingCommonVisitor : StellaParserVisitor<StellaType>, Abst
      * name = StellaIdent                                        # TypeVar
      */
     override fun visitTypeVar(ctx: StellaParser.TypeVarContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitConstMemory(ctx: StellaParser.ConstMemoryContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitTryCatch(ctx: StellaParser.TryCatchContext): StellaType {
         TODO("Not yet implemented")
     }
 
@@ -143,20 +106,7 @@ abstract class TypeCheckingCommonVisitor : StellaParserVisitor<StellaType>, Abst
         TODO("Not yet implemented")
     }
 
-    override fun visitSequence(ctx: StellaParser.SequenceContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-
-    override fun visitDeref(ctx: StellaParser.DerefContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
     override fun visitTypeApplication(ctx: StellaParser.TypeApplicationContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitTryWith(ctx: StellaParser.TryWithContext): StellaType {
         TODO("Not yet implemented")
     }
 
@@ -169,23 +119,12 @@ abstract class TypeCheckingCommonVisitor : StellaParserVisitor<StellaType>, Abst
         TODO("Not yet implemented")
     }
 
-    override fun visitRef(ctx: StellaParser.RefContext): StellaType {
-        TODO("Not yet implemented")
-    }
 
     override fun visitDeclFunGeneric(ctx: StellaParser.DeclFunGenericContext): StellaType {
         TODO("Not yet implemented")
     }
 
     override fun visitDeclTypeAlias(ctx: StellaParser.DeclTypeAliasContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitDeclExceptionType(ctx: StellaParser.DeclExceptionTypeContext): StellaType {
-        TODO("Not yet implemented")
-    }
-
-    override fun visitDeclExceptionVariant(ctx: StellaParser.DeclExceptionVariantContext): StellaType {
         TODO("Not yet implemented")
     }
 

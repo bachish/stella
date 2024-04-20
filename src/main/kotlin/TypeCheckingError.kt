@@ -9,8 +9,7 @@ class TypeCheckingError private constructor(val errorTag: String, message: Strin
             this(
                 errorTag,
                 "$message in expression ${ctx.text} at line ${ctx.start.line} col ${ctx.start.charPositionInLine}"
-            ) {
-    }
+            )
 
     companion object {
 
@@ -228,7 +227,6 @@ class TypeCheckingError private constructor(val errorTag: String, message: Strin
         }
 
 
-
         /**
          * MATCHING
          */
@@ -270,6 +268,70 @@ class TypeCheckingError private constructor(val errorTag: String, message: Strin
 
         fun ambiguousPatternType(ctx: StellaRuleContext): TypeCheckingError {
             return TypeCheckingError("ERROR_AMBIGUOUS_PATTERN_TYPE", ctx)
+        }
+
+        /**
+         * REFERENCES
+         */
+
+        fun notARef(ctx: StellaRuleContext): TypeCheckingError {
+            return TypeCheckingError("ERROR_NOT_A_REFERENCE", ctx)
+        }
+
+        fun unexpectedRef(ctx: StellaRuleContext): TypeCheckingError {
+            return TypeCheckingError("ERROR_UNEXPECTED_REFERENCE", ctx)
+        }
+
+        fun ambiguousRef(ctx: StellaRuleContext): TypeCheckingError {
+            return TypeCheckingError("ERROR_AMBIGUOUS_REFERENCE_TYPE", ctx)
+        }
+
+        fun unexpectedAddr(ctx: StellaRuleContext): TypeCheckingError {
+            return TypeCheckingError("ERROR_UNEXPECTED_MEMORY_ADDRESS", ctx)
+        }
+
+        /**
+         * Errors
+         */
+
+        /**
+         *  неоднозначный тип ошибки (Panic);
+         */
+        fun ambiguousPanic(ctx: StellaRuleContext): TypeCheckingError {
+            return TypeCheckingError("ERROR_AMBIGUOUS_PANIC_TYPE", ctx)
+        }
+
+        /**
+         * неоднозначный тип throw-выражения (Throw)
+         */
+        fun ambiguousThrowType(ctx: StellaRuleContext): TypeCheckingError {
+            return TypeCheckingError("ERROR_AMBIGUOUS_THROW_TYPE", ctx)
+        }
+
+        /**
+         * неоднозначный тип throw-выражения (Throw)
+         */
+        fun exceptionTypeNotDecl(ctx: StellaRuleContext): TypeCheckingError {
+            return TypeCheckingError("ERROR_EXCEPTION_TYPE_NOT_DECLARED", ctx)
+        }
+
+        fun unmatchedErrorTypes(ctx: StellaRuleContext): TypeCheckingError {
+            return TypeCheckingError("Variant and non variant error type used", ctx)
+        }
+
+        fun missingTypeForLabel(ctx: StellaRuleContext, label: String): TypeCheckingError {
+            return TypeCheckingError("ERROR_MISSING_TYPE_FOR_LABEL", ctx, "label: $label")
+        }
+
+        fun unexpectedSubtype(
+            parentType: StellaType,
+            subType: StellaType,
+            ctx: StellaRuleContext
+        ): TypeCheckingError {
+            return TypeCheckingError(
+                "ERROR_UNEXPECTED_SUBTYPE", ctx,
+                "parent type $parentType, subtype $subType "
+            )
         }
 
     }
